@@ -3,6 +3,7 @@ import { ProductsComponent } from './components/products/products.component';
 
 @Component({
   selector: 'app-root',
+  standalone: true,
   imports: [ProductsComponent],
   templateUrl: './app.html',
   styleUrls: ['./app.css'],

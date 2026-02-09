@@ -1,6 +1,5 @@
 <div class="page">
   <div class="container-inner">
-    <!-- Hero Card -->
     <div class="hero-card">
       <div class="hero-left">
         <div class="hero-icon">
@@ -13,13 +12,13 @@
       </div>
     </div>
 
-    <!-- Tabs -->
     <div class="tabs-card">
       <div class="tabs">
         <button
           class="tab"
           [class.active]="activeTab === 'products'"
           (click)="setActiveTab('products')"
+          type="button"
         >
           <span class="material-icons">inventory_2</span>
           <span>Produtos</span>
@@ -28,6 +27,7 @@
           class="tab"
           [class.active]="activeTab === 'rawMaterials'"
           (click)="setActiveTab('rawMaterials')"
+          type="button"
         >
           <span class="material-icons">category</span>
           <span>Matérias-Primas</span>
@@ -36,21 +36,24 @@
           class="tab"
           [class.active]="activeTab === 'production'"
           (click)="setActiveTab('production')"
+          type="button"
+          [disabled]="!isProductionTabEnabled"
+          [title]="!isProductionTabEnabled ? 'Aguarde o carregamento dos dados' : ''"
         >
           <span class="material-icons">analytics</span>
           <span>Análise de Produção</span>
+          <span *ngIf="!isProductionTabEnabled" class="loading-dot"></span>
         </button>
       </div>
     </div>
 
-    <!-- Content Card - Products -->
     <div class="content-card" *ngIf="activeTab === 'products'">
       <div class="controls">
         <div class="search">
           <span class="material-icons search-icon">search</span>
           <input type="text" placeholder="Buscar produtos..." [(ngModel)]="searchTerm" />
         </div>
-        <button class="new-btn" (click)="openNewProductModal()">
+        <button class="new-btn" (click)="openNewProductModal()" type="button">
           <span class="material-icons">add</span>
           <span>Novo Produto</span>
         </button>
@@ -60,39 +63,38 @@
         <div class="product-card" *ngFor="let p of filteredProducts">
           <div class="card-left">
             <strong>{{ p.name }}</strong>
-            <p>{{ p.description }}</p>
+            <p class="code-text">Código: {{ p.code }}</p>
             <div class="meta">
               <span class="price">
-                Preço: <span class="price-green">R$ {{ p.price | number: '1.2-2' }}</span>
+                Preço: <span class="price-green">{{ formatCurrency(p.price || 0) }}</span>
               </span>
               <span class="raw-materials"> Matérias-primas: {{ p.rawMaterials.length }} </span>
             </div>
           </div>
           <div class="card-right">
-            <button class="icon" title="Editar" (click)="openEditProductModal(p)">
+            <button class="icon" title="Editar" (click)="openEditProductModal(p)" type="button">
               <span class="material-icons">edit</span>
             </button>
-            <button class="icon delete" title="Excluir" (click)="deleteProduct(p)">
+            <button class="icon delete" title="Excluir" (click)="deleteProduct(p)" type="button">
               <span class="material-icons">delete</span>
             </button>
           </div>
         </div>
 
-        <div class="empty-state" *ngIf="filteredProducts.length === 0">
+        <div class="empty-state" *ngIf="filteredProducts.length === 0 && !isLoading">
           <span class="material-icons">inbox</span>
           <p>Nenhum produto encontrado</p>
         </div>
       </div>
     </div>
 
-    <!-- Content Card - Raw Materials -->
     <div class="content-card" *ngIf="activeTab === 'rawMaterials'">
       <div class="controls">
         <div class="search">
           <span class="material-icons search-icon">search</span>
           <input type="text" placeholder="Buscar matérias-primas..." [(ngModel)]="searchTerm" />
         </div>
-        <button class="new-btn" (click)="openNewRawMaterialModal()">
+        <button class="new-btn" (click)="openNewRawMaterialModal()" type="button">
           <span class="material-icons">add</span>
           <span>Nova Matéria-Prima</span>
         </button>
@@ -102,31 +104,40 @@
         <div class="product-card" *ngFor="let rm of filteredRawMaterials">
           <div class="card-left">
             <strong>{{ rm.name }}</strong>
-            <p>{{ rm.description }}</p>
+            <p class="code-text">Código: {{ rm.code }}</p>
             <div class="meta">
-              <span class="stock" [class.low-stock]="rm.stock < 10">
-                Estoque: <strong>{{ rm.stock }} {{ rm.unit }}</strong>
+              <span class="stock" [class.low-stock]="(rm.stock || 0) < 10">
+                Estoque: <strong>{{ formatForDisplay(rm.stock) }} unidades</strong>
               </span>
             </div>
           </div>
           <div class="card-right">
-            <button class="icon" title="Editar" (click)="openEditRawMaterialModal(rm)">
+            <button
+              class="icon"
+              title="Editar"
+              (click)="openEditRawMaterialModal(rm)"
+              type="button"
+            >
               <span class="material-icons">edit</span>
             </button>
-            <button class="icon delete" title="Excluir" (click)="deleteRawMaterial(rm)">
+            <button
+              class="icon delete"
+              title="Excluir"
+              (click)="deleteRawMaterial(rm)"
+              type="button"
+            >
               <span class="material-icons">delete</span>
             </button>
           </div>
         </div>
 
-        <div class="empty-state" *ngIf="filteredRawMaterials.length === 0">
+        <div class="empty-state" *ngIf="filteredRawMaterials.length === 0 && !isLoading">
           <span class="material-icons">inbox</span>
           <p>Nenhuma matéria-prima encontrada</p>
         </div>
       </div>
     </div>
 
-    <!-- Content Card - Production Analysis -->
     <div class="content-card" *ngIf="activeTab === 'production'">
       <div class="production-header">
         <h3>Análise de Produção Otimizada</h3>
@@ -144,7 +155,7 @@
         <div class="summary-card highlight">
           <span class="material-icons">attach_money</span>
           <div>
-            <strong>R$ {{ getTotalProductionValue() | number: '1.2-2' }}</strong>
+            <strong>{{ formatCurrency(getTotalProductionValue()) }}</strong>
             <span>Valor Total</span>
           </div>
         </div>
@@ -159,22 +170,22 @@
             <div class="production-number">{{ i + 1 }}</div>
             <div class="production-info">
               <strong>{{ suggestion.product.name }}</strong>
-              <p>{{ suggestion.product.description }}</p>
+              <p>Código: {{ suggestion.product.code }}</p>
             </div>
           </div>
 
           <div class="production-stats">
             <div class="stat">
               <span class="label">Quantidade Máxima</span>
-              <span class="value">{{ suggestion.maxQuantity }} unidades</span>
+              <span class="value">{{ formatForDisplay(suggestion.maxQuantity) }} unidades</span>
             </div>
             <div class="stat">
               <span class="label">Valor Unitário</span>
-              <span class="value">R$ {{ suggestion.product.price | number: '1.2-2' }}</span>
+              <span class="value">{{ formatCurrency(suggestion.product.price || 0) }}</span>
             </div>
             <div class="stat highlight">
               <span class="label">Valor Total</span>
-              <span class="value">R$ {{ suggestion.totalValue | number: '1.2-2' }}</span>
+              <span class="value">{{ formatCurrency(suggestion.totalValue) }}</span>
             </div>
           </div>
 
@@ -183,9 +194,7 @@
             <div class="materials-grid">
               <div class="material-item" *ngFor="let used of suggestion.rawMaterialsUsed">
                 <span class="material-name">{{ used.rawMaterial.name }}</span>
-                <span class="material-qty"
-                  >{{ used.quantityUsed | number: '1.2-2' }} {{ used.rawMaterial.unit }}</span
-                >
+                <span class="material-qty">{{ formatForDisplay(used.quantityUsed) }} unidades</span>
               </div>
             </div>
           </div>
@@ -200,40 +209,51 @@
   </div>
 </div>
 
-<!-- Modal - Product -->
 <div class="modal-overlay" *ngIf="showProductModal" (click)="closeProductModal()">
   <div class="modal" (click)="$event.stopPropagation()">
     <div class="modal-header">
       <h3>{{ editingProduct ? 'Editar Produto' : 'Novo Produto' }}</h3>
-      <button class="close-btn" (click)="closeProductModal()">
+      <button class="close-btn" (click)="closeProductModal()" type="button">
         <span class="material-icons">close</span>
       </button>
     </div>
 
     <div class="modal-body">
-      <div class="form-group">
-        <label>Nome do Produto *</label>
-        <input type="text" [(ngModel)]="productForm.name" placeholder="Ex: Bolo de Chocolate" />
+      <div *ngIf="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <div class="form-group" *ngIf="!editingProduct">
+        <label>Código</label>
+        <input type="text" [(ngModel)]="productForm.code" placeholder="Ex: PROD001" readonly />
+      </div>
+
+      <div class="form-group" *ngIf="editingProduct">
+        <label>Código</label>
+        <input type="text" [(ngModel)]="productForm.code" readonly class="disabled-input" />
       </div>
 
       <div class="form-group">
-        <label>Descrição *</label>
+        <label>Nome do Produto</label>
+        <input type="text" [(ngModel)]="productForm.name" placeholder="Ex: Mesa de Madeira" />
+      </div>
+
+      <div class="form-group">
+        <label>Preço (R$)</label>
         <input
-          type="text"
-          [(ngModel)]="productForm.description"
-          placeholder="Ex: Bolo tradicional de chocolate"
+          type="number"
+          [ngModel]="productForm.price"
+          (ngModelChange)="productForm.price = $event"
+          step="0.01"
+          min="0"
+          placeholder="0,00"
         />
-      </div>
-
-      <div class="form-group">
-        <label>Preço (R$) *</label>
-        <input type="number" [(ngModel)]="productForm.price" step="0.01" placeholder="0.00" />
       </div>
 
       <div class="form-section">
         <div class="section-header">
           <label>Matérias-Primas</label>
-          <button class="add-btn" (click)="addRawMaterialToProduct()">
+          <button class="add-btn" (click)="addRawMaterialToProduct()" type="button">
             <span class="material-icons">add</span>
             Adicionar
           </button>
@@ -242,9 +262,9 @@
         <div class="materials-list" *ngIf="productForm.rawMaterials.length > 0">
           <div class="material-row" *ngFor="let rm of productForm.rawMaterials; let i = index">
             <select [(ngModel)]="rm.rawMaterialId" class="material-select">
-              <option [value]="0">Selecione a matéria-prima</option>
+              <option value="">Selecione a matéria-prima</option>
               <option *ngFor="let raw of rawMaterials" [value]="raw.id">
-                {{ raw.name }} ({{ raw.unit }})
+                {{ raw.name }}
               </option>
             </select>
             <input
@@ -253,8 +273,9 @@
               step="0.01"
               placeholder="Qtd"
               class="quantity-input"
+              min="0.01"
             />
-            <button class="remove-btn" (click)="removeRawMaterialFromProduct(i)">
+            <button class="remove-btn" (click)="removeRawMaterialFromProduct(i)" type="button">
               <span class="material-icons">delete</span>
             </button>
           </div>
@@ -267,57 +288,90 @@
     </div>
 
     <div class="modal-footer">
-      <button class="cancel-btn" (click)="closeProductModal()">Cancelar</button>
-      <button class="save-btn" (click)="saveProduct()">Salvar</button>
+      <button class="cancel-btn" (click)="closeProductModal()" type="button">Cancelar</button>
+      <button
+        class="save-btn"
+        (click)="saveProduct()"
+        type="button"
+        [disabled]="!editingProduct && !isProductFormValid()"
+      >
+        Salvar
+      </button>
     </div>
   </div>
 </div>
 
-<!-- Modal - Raw Material -->
 <div class="modal-overlay" *ngIf="showRawMaterialModal" (click)="closeRawMaterialModal()">
   <div class="modal" (click)="$event.stopPropagation()">
     <div class="modal-header">
       <h3>{{ editingRawMaterial ? 'Editar Matéria-Prima' : 'Nova Matéria-Prima' }}</h3>
-      <button class="close-btn" (click)="closeRawMaterialModal()">
+      <button class="close-btn" (click)="closeRawMaterialModal()" type="button">
         <span class="material-icons">close</span>
       </button>
     </div>
 
     <div class="modal-body">
-      <div class="form-group">
-        <label>Nome da Matéria-Prima *</label>
-        <input type="text" [(ngModel)]="rawMaterialForm.name" placeholder="Ex: Farinha de Trigo" />
+      <div *ngIf="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <div class="form-group" *ngIf="!editingRawMaterial">
+        <label>Código</label>
+        <input type="text" [(ngModel)]="rawMaterialForm.code" placeholder="Ex: MP001" readonly />
+      </div>
+
+      <div class="form-group" *ngIf="editingRawMaterial">
+        <label>Código</label>
+        <input type="text" [(ngModel)]="rawMaterialForm.code" readonly class="disabled-input" />
       </div>
 
       <div class="form-group">
-        <label>Descrição *</label>
+        <label>Nome da Matéria-Prima</label>
+        <input type="text" [(ngModel)]="rawMaterialForm.name" placeholder="Ex: Tábua de Madeira" />
+      </div>
+
+      <div class="form-group">
+        <label>Estoque Atual (unidades)</label>
         <input
-          type="text"
-          [(ngModel)]="rawMaterialForm.description"
-          placeholder="Ex: Farinha tipo 1"
+          type="number"
+          [ngModel]="rawMaterialForm.stock"
+          (ngModelChange)="rawMaterialForm.stock = $event"
+          step="0.01"
+          placeholder="0"
+          min="0"
         />
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label>Unidade *</label>
-          <input
-            type="text"
-            [(ngModel)]="rawMaterialForm.unit"
-            placeholder="Ex: kg, litro, unidade"
-          />
-        </div>
-
-        <div class="form-group">
-          <label>Estoque Atual *</label>
-          <input type="number" [(ngModel)]="rawMaterialForm.stock" step="0.01" placeholder="0" />
-        </div>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button class="cancel-btn" (click)="closeRawMaterialModal()">Cancelar</button>
-      <button class="save-btn" (click)="saveRawMaterial()">Salvar</button>
+      <button class="cancel-btn" (click)="closeRawMaterialModal()" type="button">Cancelar</button>
+      <button
+        class="save-btn"
+        (click)="saveRawMaterial()"
+        type="button"
+        [disabled]="!editingRawMaterial && !isRawMaterialFormValid()"
+      >
+        Salvar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" *ngIf="showConfirmModal" (click)="closeConfirmModal()">
+  <div class="modal confirm-modal" (click)="$event.stopPropagation()">
+    <div class="modal-body confirm-body">
+      <div class="confirm-icon">
+        <span class="material-icons">warning</span>
+      </div>
+      <h3>{{ confirmTitle }}</h3>
+      <p>{{ confirmMessage }}</p>
+    </div>
+
+    <div class="modal-footer">
+      <button class="cancel-btn" (click)="closeConfirmModal()" type="button">Cancelar</button>
+      <button class="save-btn" (click)="confirmDelete()" type="button" style="background: #ef4444">
+        Excluir
+      </button>
     </div>
   </div>
 </div>

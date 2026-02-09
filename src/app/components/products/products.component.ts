@@ -1,27 +1,43 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { forkJoin, of } from 'rxjs';
+import { catchError, switchMap } from 'rxjs/operators';
+import { CreateProductDto, ProductService, UpdateProductDto } from '../../services/product.service';
+import {
+  CreateRawMaterialDto,
+  RawMaterialService,
+  UpdateRawMaterialDto,
+} from '../../services/raw-material.service';
+import {
+  ApiProductRawMaterial,
+  CreateProductRawMaterialDto,
+  ProductRawMaterialService,
+} from '../../services/product-raw-material.service';
+import {
+  ProductionService,
+  ApiProductionSuggestion,
+  ApiProductionResponse,
+} from '../../services/production.service';
 
-// Models
 export interface Product {
-  id: number;
+  id: string;
+  code: string;
   name: string;
-  description: string;
-  price: number;
+  price: number | null;
   rawMaterials: RawMaterialAssociation[];
 }
 
 export interface RawMaterialAssociation {
-  rawMaterialId: number;
+  rawMaterialId: string;
   quantity: number;
 }
 
 export interface RawMaterial {
-  id: number;
+  id: string;
+  code: string;
   name: string;
-  description: string;
-  unit: string;
-  stock: number;
+  stock: number | null;
 }
 
 export interface ProductionSuggestion {
@@ -37,250 +53,621 @@ export interface ProductionSuggestion {
   selector: 'app-products',
   templateUrl: './products.component.html',
   styleUrls: ['./products.component.css'],
+  providers: [ProductService, RawMaterialService, ProductRawMaterialService, ProductionService],
 })
-export class ProductsComponent {
-  // Estado atual da aplicação
+export class ProductsComponent implements OnInit {
   activeTab: 'products' | 'rawMaterials' | 'production' = 'products';
   searchTerm = '';
+  isLoading = false;
+  errorMessage = '';
 
-  // Modal states
+  productsLoaded = false;
+  rawMaterialsLoaded = false;
+
   showProductModal = false;
   showRawMaterialModal = false;
+  showConfirmModal = false;
   editingProduct: Product | null = null;
   editingRawMaterial: RawMaterial | null = null;
 
-  // Form data
+  confirmAction: (() => void) | null = null;
+  confirmTitle = '';
+  confirmMessage = '';
+
   productForm: Product = this.getEmptyProduct();
   rawMaterialForm: RawMaterial = this.getEmptyRawMaterial();
 
-  // Dados mockados - Matérias-primas
-  rawMaterials: RawMaterial[] = [
-    { id: 1, name: 'Farinha de Trigo', description: 'Farinha tipo 1', unit: 'kg', stock: 50 },
-    { id: 2, name: 'Açúcar', description: 'Açúcar refinado', unit: 'kg', stock: 30 },
-    { id: 3, name: 'Ovos', description: 'Ovos frescos', unit: 'unidade', stock: 100 },
-    { id: 4, name: 'Manteiga', description: 'Manteiga sem sal', unit: 'kg', stock: 15 },
-    { id: 5, name: 'Chocolate em Pó', description: 'Cacau 50%', unit: 'kg', stock: 10 },
-    { id: 6, name: 'Fermento Biológico', description: 'Fermento fresco', unit: 'kg', stock: 5 },
-    { id: 7, name: 'Sal', description: 'Sal refinado', unit: 'kg', stock: 20 },
-    { id: 8, name: 'Leite', description: 'Leite integral', unit: 'litro', stock: 25 },
-  ];
+  rawMaterials: RawMaterial[] = [];
+  products: Product[] = [];
 
-  // Dados mockados - Produtos
-  products: Product[] = [
-    {
-      id: 1,
-      name: 'Bolo de Chocolate',
-      description: 'Bolo tradicional de chocolate',
-      price: 45.0,
-      rawMaterials: [
-        { rawMaterialId: 1, quantity: 0.5 }, // Farinha
-        { rawMaterialId: 2, quantity: 0.3 }, // Açúcar
-        { rawMaterialId: 3, quantity: 4 }, // Ovos
-        { rawMaterialId: 4, quantity: 0.2 }, // Manteiga
-        { rawMaterialId: 5, quantity: 0.2 }, // Chocolate
-      ],
-    },
-    {
-      id: 2,
-      name: 'Pão Caseiro',
-      description: 'Pão artesanal tradicional',
-      price: 12.0,
-      rawMaterials: [
-        { rawMaterialId: 1, quantity: 1.0 }, // Farinha
-        { rawMaterialId: 6, quantity: 0.05 }, // Fermento
-        { rawMaterialId: 7, quantity: 0.02 }, // Sal
-      ],
-    },
-    {
-      id: 3,
-      name: 'Biscoito Amanteigado',
-      description: 'Biscoito de manteiga crocante',
-      price: 18.0,
-      rawMaterials: [
-        { rawMaterialId: 1, quantity: 0.4 }, // Farinha
-        { rawMaterialId: 2, quantity: 0.2 }, // Açúcar
-        { rawMaterialId: 4, quantity: 0.3 }, // Manteiga
-        { rawMaterialId: 3, quantity: 2 }, // Ovos
-      ],
-    },
-  ];
-
-  // Production suggestions
   productionSuggestions: ProductionSuggestion[] = [];
 
-  constructor() {
-    this.calculateProductionSuggestions();
+  constructor(
+    private productService: ProductService,
+    private rawMaterialService: RawMaterialService,
+    private productRawMaterialService: ProductRawMaterialService,
+    private productionService: ProductionService,
+    private cdr: ChangeDetectorRef,
+  ) {}
+
+  ngOnInit() {
+    this.loadProducts();
+    this.loadRawMaterials();
   }
 
-  // Tab navigation
-  setActiveTab(tab: 'products' | 'rawMaterials' | 'production') {
-    this.activeTab = tab;
-    if (tab === 'production') {
-      this.calculateProductionSuggestions();
+  loadProducts() {
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    forkJoin({
+      products: this.productService.getAll(),
+      associations: this.productRawMaterialService.getAll(),
+    }).subscribe({
+      next: ({ products: apiProducts, associations }) => {
+        const associationsByProduct = new Map<string, ApiProductRawMaterial[]>();
+        associations.forEach((assoc) => {
+          if (!associationsByProduct.has(assoc.productId)) {
+            associationsByProduct.set(assoc.productId, []);
+          }
+          associationsByProduct.get(assoc.productId)!.push(assoc);
+        });
+
+        this.products = apiProducts
+          .map((apiProd) => {
+            const productAssociations = associationsByProduct.get(apiProd.id) || [];
+            return {
+              id: apiProd.id,
+              code: apiProd.code,
+              name: apiProd.name,
+              price: apiProd.price,
+              rawMaterials: productAssociations.map((assoc) => ({
+                rawMaterialId: assoc.rawMaterialId,
+                quantity: assoc.quantityRequired,
+              })),
+            };
+          })
+          .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+        this.productsLoaded = true;
+        this.isLoading = false;
+        this.cdr.detectChanges();
+      },
+      error: (error) => {
+        this.errorMessage = 'Erro ao carregar produtos';
+        this.productsLoaded = true;
+        this.isLoading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  loadRawMaterials() {
+    this.isLoading = true;
+    this.errorMessage = '';
+    this.rawMaterialService.getAll().subscribe({
+      next: (apiRawMaterials) => {
+        this.rawMaterials = apiRawMaterials
+          .map((apiRm) => ({
+            id: apiRm.id,
+            code: apiRm.code,
+            name: apiRm.name,
+            stock: apiRm.quantityInStock,
+          }))
+          .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+        this.rawMaterialsLoaded = true;
+        this.isLoading = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.errorMessage = 'Erro ao carregar matérias-primas';
+        this.rawMaterialsLoaded = true;
+        this.isLoading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  get isProductionTabEnabled(): boolean {
+    return this.productsLoaded && this.rawMaterialsLoaded;
+  }
+
+  loadProductionSuggestions() {
+    if (this.products.length === 0 || this.rawMaterials.length === 0) {
+      this.productionSuggestions = [];
+      return;
+    }
+
+    this.productionService.getSuggestions().subscribe({
+      next: (response: ApiProductionResponse) => {
+        this.productionSuggestions = this.mapApiSuggestionsToLocal(response.suggestions);
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.productionSuggestions = [];
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  mapApiSuggestionsToLocal(apiSuggestions: ApiProductionSuggestion[]): ProductionSuggestion[] {
+    return apiSuggestions
+      .filter((apiSuggestion) => apiSuggestion.productId && apiSuggestion.productCode)
+      .map((apiSuggestion) => {
+        let product = this.products.find((p) => p.id === apiSuggestion.productId);
+        if (!product) {
+          product = this.products.find((p) => p.code === apiSuggestion.productCode);
+        }
+        if (!product) {
+          product = {
+            id: apiSuggestion.productId,
+            code: apiSuggestion.productCode,
+            name: apiSuggestion.productName,
+            price: apiSuggestion.productPrice,
+            rawMaterials: [],
+          };
+        }
+
+        const rawMaterialsUsed =
+          product.rawMaterials
+            .map((assoc) => {
+              const rawMaterial = this.rawMaterials.find((rm) => rm.id === assoc.rawMaterialId);
+              return rawMaterial
+                ? {
+                    rawMaterial,
+                    quantityUsed: (assoc.quantity || 0) * apiSuggestion.quantityToProduce,
+                  }
+                : null;
+            })
+            .filter(
+              (item): item is { rawMaterial: RawMaterial; quantityUsed: number } => item !== null,
+            ) || [];
+
+        return {
+          product,
+          maxQuantity: apiSuggestion.quantityToProduce,
+          totalValue: apiSuggestion.totalValue,
+          rawMaterialsUsed,
+        };
+      });
+  }
+
+  formatForDisplay(value: number | null | undefined): string {
+    if (value === null || value === undefined || isNaN(value)) {
+      return '0';
+    }
+    if (Number.isInteger(value)) {
+      return value.toLocaleString('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+    } else {
+      return value.toLocaleString('pt-BR', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 2,
+      });
     }
   }
 
-  // Filtros
+  formatNumberForAPI(value: number | null | undefined): number {
+    if (value === null || value === undefined || isNaN(value)) {
+      return 0.0;
+    }
+    return parseFloat(value.toFixed(2));
+  }
+
+  formatCurrency(value: number | null | undefined): string {
+    if (!value && value !== 0) return 'R$ 0,00';
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
+  setActiveTab(tab: 'products' | 'rawMaterials' | 'production') {
+    if (tab === 'production' && !this.isProductionTabEnabled) {
+      return;
+    }
+
+    this.activeTab = tab;
+    if (tab === 'production') {
+      this.loadProductionSuggestions();
+    }
+    this.cdr.detectChanges();
+  }
+
   get filteredProducts() {
     if (!this.searchTerm) return this.products;
-    return this.products.filter(
+    const filtered = this.products.filter(
       (p) =>
         p.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        p.description.toLowerCase().includes(this.searchTerm.toLowerCase()),
+        p.code.toLowerCase().includes(this.searchTerm.toLowerCase()),
     );
+    return filtered.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
   }
 
   get filteredRawMaterials() {
     if (!this.searchTerm) return this.rawMaterials;
-    return this.rawMaterials.filter(
+    const filtered = this.rawMaterials.filter(
       (rm) =>
         rm.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        rm.description.toLowerCase().includes(this.searchTerm.toLowerCase()),
+        rm.code.toLowerCase().includes(this.searchTerm.toLowerCase()),
     );
+    return filtered.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
   }
 
-  // CRUD - Products
   openNewProductModal() {
     this.editingProduct = null;
     this.productForm = this.getEmptyProduct();
+    this.productForm.code = this.generateNextProductCode();
     this.showProductModal = true;
+    this.errorMessage = '';
+    this.cdr.detectChanges();
   }
 
   openEditProductModal(product: Product) {
     this.editingProduct = product;
     this.productForm = JSON.parse(JSON.stringify(product));
     this.showProductModal = true;
+    this.errorMessage = '';
+    this.cdr.detectChanges();
   }
 
   saveProduct() {
-    if (this.editingProduct) {
-      const index = this.products.findIndex((p) => p.id === this.editingProduct!.id);
-      if (index !== -1) {
-        this.products[index] = { ...this.productForm };
+    if (!this.editingProduct) {
+      if (!this.isProductFormValid()) {
+        this.errorMessage = 'Preencha todos os campos obrigatórios corretamente';
+        this.cdr.detectChanges();
+        return;
       }
-    } else {
-      const newId = Math.max(...this.products.map((p) => p.id), 0) + 1;
-      this.products.push({ ...this.productForm, id: newId });
     }
-    this.closeProductModal();
+
+    const price =
+      this.productForm.price !== null && this.productForm.price !== undefined
+        ? this.productForm.price
+        : this.editingProduct?.price || 0;
+
+    const name = this.productForm.name || this.editingProduct?.name || '';
+    const code = this.productForm.code || this.editingProduct?.code || '';
+
+    const priceForAPI = this.formatNumberForAPI(price);
+
+    if (this.editingProduct) {
+      const updateData: UpdateProductDto = {
+        code: code,
+        name: name,
+        price: priceForAPI,
+      };
+
+      this.productService
+        .update(this.editingProduct.id, updateData)
+        .pipe(
+          switchMap((updatedProduct) => {
+            return this.saveProductRawMaterials(updatedProduct.id, true).pipe(
+              switchMap(() => of(updatedProduct)),
+            );
+          }),
+        )
+        .subscribe({
+          next: (updatedProduct) => {
+            const index = this.products.findIndex((p) => p.id === updatedProduct.id);
+            if (index !== -1) {
+              this.products[index] = {
+                id: updatedProduct.id,
+                code: updatedProduct.code,
+                name: updatedProduct.name,
+                price: updatedProduct.price,
+                rawMaterials: this.productForm.rawMaterials,
+              };
+              this.products.sort((a, b) =>
+                a.code.localeCompare(b.code, undefined, { numeric: true }),
+              );
+            }
+            this.closeProductModal();
+            if (this.activeTab === 'production') {
+              this.loadProductionSuggestions();
+            }
+          },
+          error: () => {
+            this.errorMessage = 'Erro ao atualizar produto';
+            this.cdr.detectChanges();
+          },
+        });
+    } else {
+      const createData: CreateProductDto = {
+        code: code,
+        name: name,
+        price: priceForAPI,
+      };
+
+      this.productService
+        .create(createData)
+        .pipe(
+          switchMap((newProduct) => {
+            return this.saveProductRawMaterials(newProduct.id, false).pipe(
+              switchMap(() => of(newProduct)),
+            );
+          }),
+        )
+        .subscribe({
+          next: (newProduct) => {
+            this.products.push({
+              id: newProduct.id,
+              code: newProduct.code,
+              name: newProduct.name,
+              price: newProduct.price,
+              rawMaterials: this.productForm.rawMaterials,
+            });
+            this.products.sort((a, b) =>
+              a.code.localeCompare(b.code, undefined, { numeric: true }),
+            );
+            this.closeProductModal();
+            if (this.activeTab === 'production') {
+              this.loadProductionSuggestions();
+            }
+          },
+          error: () => {
+            this.errorMessage = 'Erro ao criar produto';
+            this.cdr.detectChanges();
+          },
+        });
+    }
+  }
+
+  private saveProductRawMaterials(productId: string, isEditing: boolean = false) {
+    const validRawMaterials = this.productForm.rawMaterials.filter(
+      (rm) => rm.rawMaterialId && rm.quantity > 0,
+    );
+
+    const deleteOldAssociations$ = isEditing
+      ? this.productRawMaterialService.deleteByProduct(productId).pipe(
+          catchError(() => {
+            return of(null);
+          }),
+        )
+      : of(null);
+
+    return deleteOldAssociations$.pipe(
+      switchMap(() => {
+        if (validRawMaterials.length === 0) {
+          return of(null);
+        }
+
+        const saveRequests = validRawMaterials.map((rm) => {
+          const dto: CreateProductRawMaterialDto = {
+            productId: productId,
+            rawMaterialId: rm.rawMaterialId,
+            quantityRequired: rm.quantity,
+          };
+          return this.productRawMaterialService.create(dto).pipe(
+            catchError(() => {
+              return of(null);
+            }),
+          );
+        });
+
+        return forkJoin(saveRequests);
+      }),
+    );
+  }
+
+  isProductFormValid(): boolean {
+    const hasName = !!this.productForm.name?.trim();
+    const hasCode = !!this.productForm.code?.trim();
+    const hasValidPrice =
+      this.productForm.price !== null &&
+      this.productForm.price !== undefined &&
+      this.productForm.price >= 0;
+    return hasName && hasCode && hasValidPrice;
   }
 
   deleteProduct(product: Product) {
-    if (confirm(`Deseja realmente excluir o produto "${product.name}"?`)) {
-      this.products = this.products.filter((p) => p.id !== product.id);
-    }
+    this.confirmTitle = 'Excluir Produto';
+    this.confirmMessage = `Deseja realmente excluir o produto "${product.name}"?`;
+    this.confirmAction = () => {
+      this.productService.delete(product.id).subscribe({
+        next: () => {
+          this.products = this.products.filter((p) => p.id !== product.id);
+          this.closeConfirmModal();
+          this.cdr.detectChanges();
+          if (this.activeTab === 'production') {
+            this.loadProductionSuggestions();
+          }
+        },
+        error: () => {
+          this.errorMessage = 'Erro ao excluir produto';
+          this.closeConfirmModal();
+          this.cdr.detectChanges();
+        },
+      });
+    };
+    this.showConfirmModal = true;
+    this.cdr.detectChanges();
   }
 
-  closeProductModal() {
+  closeProductModal(event?: MouseEvent) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     this.showProductModal = false;
     this.editingProduct = null;
     this.productForm = this.getEmptyProduct();
+    this.errorMessage = '';
+    this.cdr.markForCheck();
   }
 
-  // CRUD - Raw Materials
   openNewRawMaterialModal() {
     this.editingRawMaterial = null;
     this.rawMaterialForm = this.getEmptyRawMaterial();
+    this.rawMaterialForm.code = this.generateNextRawMaterialCode();
     this.showRawMaterialModal = true;
+    this.errorMessage = '';
+    this.cdr.detectChanges();
   }
 
   openEditRawMaterialModal(rawMaterial: RawMaterial) {
     this.editingRawMaterial = rawMaterial;
     this.rawMaterialForm = JSON.parse(JSON.stringify(rawMaterial));
     this.showRawMaterialModal = true;
+    this.errorMessage = '';
+    this.cdr.detectChanges();
   }
 
   saveRawMaterial() {
-    if (this.editingRawMaterial) {
-      const index = this.rawMaterials.findIndex((rm) => rm.id === this.editingRawMaterial!.id);
-      if (index !== -1) {
-        this.rawMaterials[index] = { ...this.rawMaterialForm };
+    if (!this.editingRawMaterial) {
+      if (!this.isRawMaterialFormValid()) {
+        this.errorMessage = 'Preencha todos os campos obrigatórios corretamente';
+        this.cdr.detectChanges();
+        return;
       }
-    } else {
-      const newId = Math.max(...this.rawMaterials.map((rm) => rm.id), 0) + 1;
-      this.rawMaterials.push({ ...this.rawMaterialForm, id: newId });
     }
-    this.closeRawMaterialModal();
+
+    const stock =
+      this.rawMaterialForm.stock !== null && this.rawMaterialForm.stock !== undefined
+        ? this.rawMaterialForm.stock
+        : this.editingRawMaterial?.stock || 0;
+
+    const name = this.rawMaterialForm.name || this.editingRawMaterial?.name || '';
+    const code = this.rawMaterialForm.code || this.editingRawMaterial?.code || '';
+
+    const stockForAPI = this.formatNumberForAPI(stock);
+
+    if (this.editingRawMaterial) {
+      const updateData: UpdateRawMaterialDto = {
+        code: code,
+        name: name,
+        quantityInStock: stockForAPI,
+      };
+
+      this.rawMaterialService.update(this.editingRawMaterial.id, updateData).subscribe({
+        next: (updatedRawMaterial) => {
+          const index = this.rawMaterials.findIndex((rm) => rm.id === updatedRawMaterial.id);
+          if (index !== -1) {
+            this.rawMaterials[index] = {
+              id: updatedRawMaterial.id,
+              code: updatedRawMaterial.code,
+              name: updatedRawMaterial.name,
+              stock: updatedRawMaterial.quantityInStock,
+            };
+            this.rawMaterials.sort((a, b) =>
+              a.code.localeCompare(b.code, undefined, { numeric: true }),
+            );
+          }
+          this.closeRawMaterialModal();
+          if (this.activeTab === 'production') {
+            this.loadProductionSuggestions();
+          }
+        },
+        error: () => {
+          this.errorMessage = 'Erro ao atualizar matéria-prima';
+          this.cdr.detectChanges();
+        },
+      });
+    } else {
+      const createData: CreateRawMaterialDto = {
+        code: code,
+        name: name,
+        quantityInStock: stockForAPI,
+      };
+
+      this.rawMaterialService.create(createData).subscribe({
+        next: (newRawMaterial) => {
+          this.rawMaterials.push({
+            id: newRawMaterial.id,
+            code: newRawMaterial.code,
+            name: newRawMaterial.name,
+            stock: newRawMaterial.quantityInStock,
+          });
+          this.rawMaterials.sort((a, b) =>
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+          );
+          this.closeRawMaterialModal();
+          if (this.activeTab === 'production') {
+            this.loadProductionSuggestions();
+          }
+        },
+        error: () => {
+          this.errorMessage = 'Erro ao criar matéria-prima';
+          this.cdr.detectChanges();
+        },
+      });
+    }
+  }
+
+  isRawMaterialFormValid(): boolean {
+    const hasName = !!this.rawMaterialForm.name?.trim();
+    const hasCode = !!this.rawMaterialForm.code?.trim();
+    const stockValue = this.rawMaterialForm.stock;
+    const hasValidStock =
+      stockValue !== null && stockValue !== undefined && !isNaN(stockValue) && stockValue >= 0;
+    return hasName && hasCode && hasValidStock;
   }
 
   deleteRawMaterial(rawMaterial: RawMaterial) {
-    if (confirm(`Deseja realmente excluir a matéria-prima "${rawMaterial.name}"?`)) {
-      this.rawMaterials = this.rawMaterials.filter((rm) => rm.id !== rawMaterial.id);
-    }
+    this.confirmTitle = 'Excluir Matéria-Prima';
+    this.confirmMessage = `Deseja realmente excluir a matéria-prima "${rawMaterial.name}"?`;
+    this.confirmAction = () => {
+      this.rawMaterialService.delete(rawMaterial.id).subscribe({
+        next: () => {
+          this.rawMaterials = this.rawMaterials.filter((rm) => rm.id !== rawMaterial.id);
+          this.closeConfirmModal();
+          this.cdr.detectChanges();
+          if (this.activeTab === 'production') {
+            this.loadProductionSuggestions();
+          }
+        },
+        error: () => {
+          this.errorMessage = 'Erro ao excluir matéria-prima';
+          this.closeConfirmModal();
+          this.cdr.detectChanges();
+        },
+      });
+    };
+    this.showConfirmModal = true;
+    this.cdr.detectChanges();
   }
 
-  closeRawMaterialModal() {
+  closeRawMaterialModal(event?: MouseEvent) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     this.showRawMaterialModal = false;
     this.editingRawMaterial = null;
     this.rawMaterialForm = this.getEmptyRawMaterial();
+    this.errorMessage = '';
+    this.cdr.markForCheck();
   }
 
-  // Product Raw Materials Management
+  closeConfirmModal(event?: MouseEvent) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    this.showConfirmModal = false;
+    this.confirmAction = null;
+    this.confirmTitle = '';
+    this.confirmMessage = '';
+    this.cdr.markForCheck();
+  }
+
+  confirmDelete() {
+    if (this.confirmAction) {
+      this.confirmAction();
+    }
+  }
+
   addRawMaterialToProduct() {
-    this.productForm.rawMaterials.push({ rawMaterialId: 0, quantity: 0 });
+    this.productForm.rawMaterials.push({ rawMaterialId: '', quantity: 0 });
+    this.cdr.detectChanges();
   }
 
   removeRawMaterialFromProduct(index: number) {
     this.productForm.rawMaterials.splice(index, 1);
-  }
-
-  getRawMaterialName(id: number): string {
-    const rm = this.rawMaterials.find((r) => r.id === id);
-    return rm ? rm.name : 'Selecione...';
-  }
-
-  getRawMaterialUnit(id: number): string {
-    const rm = this.rawMaterials.find((r) => r.id === id);
-    return rm ? rm.unit : '';
-  }
-
-  // Production Analysis
-  calculateProductionSuggestions() {
-    const suggestions: ProductionSuggestion[] = [];
-    const sortedProducts = [...this.products].sort((a, b) => b.price - a.price);
-    const availableStock = new Map<number, number>();
-
-    this.rawMaterials.forEach((rm) => {
-      availableStock.set(rm.id, rm.stock);
-    });
-
-    for (const product of sortedProducts) {
-      const maxQuantity = this.calculateMaxProductionQuantity(product, availableStock);
-
-      if (maxQuantity > 0) {
-        const rawMaterialsUsed: { rawMaterial: RawMaterial; quantityUsed: number }[] = [];
-
-        product.rawMaterials.forEach((assoc) => {
-          const currentStock = availableStock.get(assoc.rawMaterialId) || 0;
-          const quantityUsed = assoc.quantity * maxQuantity;
-          availableStock.set(assoc.rawMaterialId, currentStock - quantityUsed);
-
-          const rm = this.rawMaterials.find((r) => r.id === assoc.rawMaterialId)!;
-          rawMaterialsUsed.push({ rawMaterial: rm, quantityUsed });
-        });
-
-        suggestions.push({
-          product,
-          maxQuantity,
-          totalValue: product.price * maxQuantity,
-          rawMaterialsUsed,
-        });
-      }
-    }
-
-    this.productionSuggestions = suggestions;
-  }
-
-  calculateMaxProductionQuantity(product: Product, availableStock: Map<number, number>): number {
-    let maxQuantity = Infinity;
-
-    for (const assoc of product.rawMaterials) {
-      const available = availableStock.get(assoc.rawMaterialId) || 0;
-      const possibleQuantity = Math.floor(available / assoc.quantity);
-      maxQuantity = Math.min(maxQuantity, possibleQuantity);
-    }
-
-    return maxQuantity === Infinity ? 0 : maxQuantity;
+    this.cdr.detectChanges();
   }
 
   getTotalProductionValue(): number {
@@ -289,21 +676,54 @@ export class ProductsComponent {
 
   private getEmptyProduct(): Product {
     return {
-      id: 0,
+      id: '',
+      code: '',
       name: '',
-      description: '',
-      price: 0,
+      price: null as any,
       rawMaterials: [],
     };
   }
 
   private getEmptyRawMaterial(): RawMaterial {
     return {
-      id: 0,
+      id: '',
+      code: '',
       name: '',
-      description: '',
-      unit: '',
-      stock: 0,
+      stock: null as any,
     };
+  }
+
+  private generateNextProductCode(): string {
+    const prefix = 'PROD';
+    const existingCodes = this.products
+      .map((p) => p.code)
+      .filter((code) => code.startsWith(prefix))
+      .map((code) => {
+        const numberPart = code.replace(prefix, '');
+        const number = parseInt(numberPart, 10);
+        return isNaN(number) ? 0 : number;
+      });
+
+    const maxNumber = existingCodes.length > 0 ? Math.max(...existingCodes) : 0;
+    const nextNumber = maxNumber + 1;
+
+    return `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+  }
+
+  private generateNextRawMaterialCode(): string {
+    const prefix = 'MP';
+    const existingCodes = this.rawMaterials
+      .map((rm) => rm.code)
+      .filter((code) => code.startsWith(prefix))
+      .map((code) => {
+        const numberPart = code.replace(prefix, '');
+        const number = parseInt(numberPart, 10);
+        return isNaN(number) ? 0 : number;
+      });
+
+    const maxNumber = existingCodes.length > 0 ? Math.max(...existingCodes) : 0;
+    const nextNumber = maxNumber + 1;
+
+    return `${prefix}${nextNumber.toString().padStart(3, '0')}`;
   }
 }
