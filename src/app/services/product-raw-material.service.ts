@@ -45,13 +45,11 @@ export class ProductRawMaterialService {
   }
 
   deleteByProduct(productId: string): Observable<void> {
-    // Buscar todas as associações do produto e deletar uma por uma
     return this.getByProductId(productId).pipe(
       switchMap((associations) => {
         if (associations.length === 0) {
           return of(undefined as void);
         }
-        // Deletar cada associação individualmente
         const deleteRequests = associations.map((assoc) => this.delete(assoc.id));
         return forkJoin(deleteRequests).pipe(map(() => undefined as void));
       }),
