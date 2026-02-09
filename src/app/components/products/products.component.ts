@@ -130,6 +130,7 @@ export class ProductsComponent implements OnInit {
 
         this.productsLoaded = true;
         this.isLoading = false;
+        this.checkAndLoadProductionSuggestions();
         this.cdr.detectChanges();
       },
       error: (error) => {
@@ -157,6 +158,7 @@ export class ProductsComponent implements OnInit {
 
         this.rawMaterialsLoaded = true;
         this.isLoading = false;
+        this.checkAndLoadProductionSuggestions();
         this.cdr.detectChanges();
       },
       error: () => {
@@ -170,6 +172,12 @@ export class ProductsComponent implements OnInit {
 
   get isProductionTabEnabled(): boolean {
     return this.productsLoaded && this.rawMaterialsLoaded;
+  }
+
+  private checkAndLoadProductionSuggestions() {
+    if (this.isProductionTabEnabled) {
+      this.loadProductionSuggestions();
+    }
   }
 
   loadProductionSuggestions() {
