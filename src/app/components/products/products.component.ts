@@ -416,9 +416,24 @@ export class ProductsComponent implements OnInit {
               this.loadProductionSuggestions();
             }
           },
-          error: () => {
-            this.errorMessage = 'Erro ao criar produto';
-            this.cdr.detectChanges();
+          error: (error) => {
+            console.error('Erro ao criar produto:', error);
+
+            if (error?.status === 500 || error?.error?.message?.includes('Duplicate')) {
+              this.errorMessage = 'Código duplicado detectado. Recarregando produtos...';
+              this.cdr.detectChanges();
+
+              this.loadProducts();
+
+              setTimeout(() => {
+                this.productForm.code = this.generateNextProductCode();
+                this.errorMessage = 'Lista atualizada. Por favor, tente salvar novamente.';
+                this.cdr.detectChanges();
+              }, 1000);
+            } else {
+              this.errorMessage = 'Erro ao criar produto';
+              this.cdr.detectChanges();
+            }
           },
         });
     }
