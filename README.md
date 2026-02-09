@@ -2,6 +2,10 @@
 
 Este projeto foi gerado utilizando o [Angular CLI](https://github.com/angular/angular-cli) versão **21.1.3**.
 
+O **backend (API)** da aplicação está disponível no repositório:
+
+https://github.com/Thiagosn1/autoflex-api
+
 ## Pré-requisitos
 
 Antes de rodar o projeto, é necessário instalar algumas ferramentas no seu ambiente.
